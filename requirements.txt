@@ -16,3 +16,16 @@ scikit-learn
 fastapi
 uvicorn
 pydantic
+
+# PyTorch with CUDA is required by iteration10+ benchmarks (iteration16_* are the
+# current, validated artifacts). The GPU runs in this repo used the system Python
+# 3.10 install (torch 2.12.1+cu126), NOT .venv:
+#   & "C:\Users\Bulkl\AppData\Local\Programs\Python\Python310\python.exe" iteration16_corrected_streaming.py --plot
+# To install in a fresh env, follow https://pytorch.org for the CUDA build, e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu126
+torch>=2.4
+
+# For torch.compile (inductor backend) and Triton kernel fusion.
+# NOTE: Triton is Linux-only; on Windows this line only works under WSL2.
+# triton>=2.1.0
+

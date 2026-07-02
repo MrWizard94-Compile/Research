@@ -7,3 +7,11 @@ __pycache__/
 .idea/
 .vscode/
 *.log
+
+# Generated benchmark outputs (reproduce via the iteration scripts)
+results/
+plots/
+
+# Bulk archives / imported external projects
+*.zip
+extracted_grok_project/
