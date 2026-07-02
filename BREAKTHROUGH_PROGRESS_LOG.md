@@ -6,6 +6,99 @@
 
 ---
 
+## Iteration 17 — MoE Streaming Measured, Kernel Paths, Energy, Hybrid Ratios
+
+**Date**: 2026-07-02
+**Artifacts**: `iteration17_moe_streaming.py`, `iteration17_hybrid_ratio_mqar.py`
+
+Executes the four next steps set at the end of Iteration 16. All numbers below
+are measured on the GTX 1660 Ti with the GPU otherwise idle.
+
+### 1. MoE expert streaming — the biggest lever, measured end-to-end
+
+16 layers × 8 experts × 67.1 MB (8.6 GB pinned host, every expert genuinely
+allocated and streamed), tiny resident routers, top-2 routing, bytes counted as
+copied:
+
+| mode (B=1) | GB/token | wall/token | tok/s | J/token (GPU board) |
+|---|---:|---:|---:|---:|
+| dense-equivalent (all 8 experts) | 8.59 | 711 ms | 1.41 | 26.9 |
+| MoE, oracle prefetch | 2.15 | 179 ms | **5.58** | **6.5** |
+| MoE, just-in-time routing | 2.15 | 199 ms | 5.02 | 6.9 |
+
+- **4.00× fewer bytes → 3.97× faster, ~4× less energy/token.** The iteration 16
+  pipeline model holds under expert-granular streaming.
+- **JIT routing costs +11% at B=1** (routing for layer i+1 needs layer i's
+  output → CPU sync before each transfer). Oracle = perfect prefetch; published
+  expert predictors (~80–90% hit) land between the bounds. At B=8 the JIT
+  penalty grows to ~65% because the slow batched GEMM path no longer hides.
+- 70B-class MoE anchor at measured PCIe: **1.37 tok/s** single-stream (vs. 0.34
+  dense), before the dense attention-weight floor of a real MoE transformer.
+
+### 2. Kernel-path sweep (iteration 16 follow-up)
+
+Best stock-PyTorch fp16 GEMM on this TU116: 204 GB/s weight-read at B=1 (GEMV
+path) vs. ~7.5 GB/s at B=8/32 across all tested formulations (`x@W`,
+transposed, reduced-precision-reduction toggle). The ~26× batched-decode gap is
+real in stock PyTorch; custom INT4/fused kernels (llama.cpp-class, or Triton
+under WSL2) are the identified path back to the weight-read bound.
+
+### 3. Energy methodology (GPU board, integrated)
+
+J/token = sampled `nvidia-smi` power × wall time, idle (19.9 W) reported
+alongside. Dense-equivalent 26.9 J/token → MoE 6.5–6.9 J/token at B=1. Scope is
+the GPU board only (CPU/DRAM/PSU excluded — stated). Whole-system wall-plug
+metering remains future work.
+
+### 4. Hybrid ratio sweep on MQAR (4-block models, one protocol for all)
+
+Protocol finding first: at iteration 16's lr=1e-3, every 4-block model with ≥2
+SSM blocks fails to converge (loss ~2.0) while pure attention converges — which
+would falsely read as an architectural failure. At **lr=3e-4, warmup 10%** the
+1:1 hybrid converges fully; the sweep uses that one protocol for every model.
+
+| model | pattern | N=64 held-out | N=128 (extrap.) | recall state @128k |
+|---|---|---:|---:|---:|
+| attn4 | AAAA | **1.000** | 0.417 | 537 MB |
+| ratio 1:1 | SASA | **1.000** | 0.286 | **268 MB (half)** |
+| ratio 1:3 | SSAS | 0.054 † | 0.031 | 134 MB |
+| ssm4 | SSSS | 0.055 | 0.037 | ~0 MB |
+
+† **Did not converge — and this was investigated, not assumed** (see
+`results/iter17_ssas_diagnostic.txt`): attention-last placement (SSSA, 4000
+steps) fails identically, and doubling the budget (SSAS, 8000 steps)
+destabilizes late rather than converging. Combined with iteration 16's 2-block
+[SSM→ATTN] reaching 100%, the bounded finding is: at d=128 scale, one attention
+layer forms the recall circuit behind **one** SSM block but not behind three,
+under every protocol tested. Production hybrids run 1:3–1:7 at vastly larger
+width/depth and training budgets, so this flags small-scale training
+difficulty, not a fundamental cap — but at this scale, **1:1 is the measured
+frontier: transformer-level recall at half the KV.**
+
+### Success-criteria movement
+
+- Data-movement reduction: MoE streaming measured at 4× bytes/energy per token
+  (on top of the fit-enabling architecture) — real progress toward the ≥10×
+  criterion, honestly short of it on throughput-critical dense paths.
+- Quality ≥95% with reduced memory: met by the 1:1 hybrid at half KV (through
+  N=64, in-distribution); constant-memory (pure SSM) recall remains capacity-
+  limited, as iteration 16 found.
+
+### Next steps (carried into Iteration 18)
+
+1. Custom INT4/fused decode kernels (WSL2 Triton or llama.cpp integration) to
+   close the 26× batched-GEMM gap.
+2. Expert-prefetch predictor to close the JIT→oracle routing gap; measure hit
+   rate against recorded routing traces.
+3. Scale the hybrid-ratio question (wider d_model, more heads/steps) to test
+   whether sparse ratios (1:3+) recover recall with scale, as published hybrids
+   indicate.
+4. Wall-plug (whole-system) energy metering.
+5. Milestone: stream a real MoE checkpoint (Mixtral-class INT4) through this
+   pipeline end-to-end.
+
+---
+
 ## Iteration 16 — Audit, Retraction, and Corrected Baselines
 
 **Date**: 2026-07-02

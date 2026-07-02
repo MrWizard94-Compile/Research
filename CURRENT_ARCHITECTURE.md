@@ -1,8 +1,9 @@
-# CURRENT ARCHITECTURE (Iteration 16 — Corrected Streaming, Audit of Iterations 10–15)
+# CURRENT ARCHITECTURE (Iterations 16–17 — Corrected Streaming + Measured MoE)
 
-**Iteration**: 16
+**Iterations**: 16 (audit + corrected dense streaming) · 17 (MoE expert streaming, kernels, energy, hybrid ratios)
 **Date**: 2026-07-02
-**Artifacts**: `iteration16_corrected_streaming.py` (performance), `iteration16_quality_mqar.py` (quality)
+**Artifacts**: `iteration16_corrected_streaming.py`, `iteration16_quality_mqar.py`,
+`iteration17_moe_streaming.py`, `iteration17_hybrid_ratio_mqar.py`
 
 > **Correction notice**: The Iteration 15 version of this document reported results
 > from a benchmark that never ran the model it claimed (an 8-layer, <10 MB proxy was
@@ -71,6 +72,29 @@ Dense 70B INT4 = 80 layers × 0.441 GB = 35.3 GB streamed per token:
 period. The real levers are MoE sparsity (stream only active experts), batching /
 speculative decoding (amortize each weight pass), residency, and faster host links
 (PCIe 4/5 hardware scales these numbers roughly linearly).
+
+## MoE Expert Streaming — the biggest lever, now measured (Iteration 17)
+
+`iteration17_moe_streaming.py`: 16 layers × 8 experts × 67.1 MB (8.6 GB pinned
+host), expert-granular transfers, tiny resident routers, top-2 routing. Bytes
+counted as copied, not assumed:
+
+| mode (B=1) | GB/token | wall/token | tok/s | J/token (GPU board) |
+|---|---:|---:|---:|---:|
+| dense-equivalent | 8.59 | 711 ms | 1.41 | 26.9 |
+| MoE, oracle prefetch | 2.15 | 179 ms | **5.58** | 6.5 |
+| MoE, just-in-time routing | 2.15 | 199 ms | 5.02 | 6.9 |
+
+Measured: **4.00× fewer bytes → 3.97× faster and ~4× less energy per token.**
+The JIT-vs-oracle spread (+11% at B=1) is the true cost of routing depending on
+the previous layer's output; real expert-prefetch predictors land between the
+bounds. 70B-class MoE anchor at measured PCIe: **~1.37 tok/s** single-stream
+(vs. 0.34 dense), before a real MoE transformer's dense attention-weight floor.
+
+The kernel-path sweep in the same artifact confirms the batched fp16 GEMM gap on
+this GPU is real across stock formulations (204 GB/s at B=1 vs ~7.5 GB/s at
+B=8/32) — custom INT4/fused kernels are the identified path back to the
+weight-read bound for batched decode.
 
 ## Memory Model @ 128k Context (the part of the original thesis that survives)
 

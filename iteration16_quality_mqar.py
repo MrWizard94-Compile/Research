@@ -243,10 +243,13 @@ MAX_TRAIN_PAIRS = max(TRAIN_PAIR_COUNTS)
 
 
 def train_model(model: RecallModel, steps: int, batch: int, device: torch.device,
-                seed: int) -> Dict:
+                seed: int, lr: float = 1e-3, warmup_frac: float = 0.05) -> Dict:
+    """lr/warmup_frac are exposed because deeper stacks with multiple recurrent
+    blocks (iteration 17 ratio sweep) diverge at lr=1e-3 but converge at 3e-4;
+    a comparison protocol must use one setting that trains every contender."""
     generator = torch.Generator(device=device).manual_seed(seed)
-    opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=0.01)
-    warmup = max(1, steps // 20)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
+    warmup = max(1, int(steps * warmup_frac))
     sched = torch.optim.lr_scheduler.SequentialLR(
         opt,
         [torch.optim.lr_scheduler.LinearLR(opt, start_factor=0.1, total_iters=warmup),

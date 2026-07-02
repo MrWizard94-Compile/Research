@@ -7,7 +7,30 @@ frontier-scale AI (70B+ class) from running locally on consumer/edge hardware.
 This is a long-term recursive engineering campaign. Every claim must be backed by
 a runnable artifact and validated measurement.
 
-## Current Status (2026-07-02, Iteration 16)
+## Current Status (2026-07-02, Iteration 17)
+
+**Iteration 17 (latest)** executed the four next steps from Iteration 16, all
+measured on the target machine (GTX 1660 Ti 6 GB + 51.4 GB host):
+
+- **MoE expert streaming measured end-to-end** (`iteration17_moe_streaming.py`):
+  16 layers × 8 experts × 67.1 MB genuinely streamed; top-2 routing moves
+  **4.00× fewer bytes → 3.97× faster (1.41 → 5.58 tok/s) and ~4× less energy
+  (26.9 → 6.5 J/token, GPU board)** than the dense equivalent. Just-in-time
+  routing costs only +11% vs. perfect prefetch at B=1. 70B-class MoE anchor:
+  **~1.37 tok/s** single-stream (vs. 0.34 dense).
+- **Kernel-path sweep**: the batched fp16 GEMM slowdown on this GPU (204 GB/s at
+  B=1 vs ~7.5 GB/s at B=8/32) is real across stock PyTorch formulations; custom
+  INT4/fused kernels are the identified fix.
+- **Energy methodology**: integrated GPU-board power per token (idle reported
+  separately; CPU/DRAM/PSU excluded — stated scope).
+- **Hybrid ratio sweep on MQAR** (`iteration17_hybrid_ratio_mqar.py`): the 1:1
+  SSM:attention hybrid reaches **transformer-level recall (100% through N=64) at
+  half the KV**. The sparser 1:3 ratio did not converge at this small scale —
+  investigated across placement and 2× budget, documented rather than hidden.
+  Protocol finding: deep recurrent hybrids need lr 3e-4 where lr 1e-3 falsely
+  looks like architectural failure.
+
+## Iteration 16 — Audit and Corrected Baselines
 
 **⚠️ Iterations 10–15 are retracted.** An audit (recorded in
 `BREAKTHROUGH_PROGRESS_LOG.md`) found their headline results were measurement and
@@ -82,6 +105,8 @@ the trade-off is now measured instead of asserted.
 python iteration16_corrected_streaming.py --plot            # 16 x 0.242 GB
 python iteration16_corrected_streaming.py --stress --plot   # 48 x 0.242 GB
 python iteration16_quality_mqar.py --steps 4000 --plot
+python iteration17_moe_streaming.py --plot                  # MoE lever, measured
+python iteration17_hybrid_ratio_mqar.py --steps 4000 --plot # ratio sweep
 python iteration1_sim.py                                    # analytical model
 ```
 
@@ -100,15 +125,18 @@ regenerate them by running the artifacts.
   historical entries preserved unedited).
 - `CLAUDE.md` — the working rules this audit enforced.
 
-## Next Steps
+## Next Steps (Iteration 18 candidates)
 
-1. MoE streaming prototype: stream only routed experts; verify the ~3× byte
-   reduction end-to-end rather than by projection.
-2. Speculative/batched decode on the streaming pipeline: measure real aggregate
-   tok/s at B=8–32 with INT4-style weight-read-bound kernels.
-3. Hybrid ratio sweep on MQAR (1:3, 1:7 SSM:attention) to quantify quality vs.
-   KV reduction beyond the 1:1 result.
-4. A defensible energy methodology: wall-power integration over real inference
-   runs, cleanly separated from throughput claims.
+1. Custom INT4/fused decode kernels (WSL2 Triton or llama.cpp integration) to
+   close the measured 26× batched-GEMM gap and make B=8–32 streaming
+   weight-read-bound.
+2. Expert-prefetch predictor to close the measured JIT→oracle routing gap;
+   evaluate hit rate against recorded routing traces.
+3. Scale the hybrid-ratio question (wider d_model, more heads/steps) to test
+   whether sparse ratios (1:3+) recover recall with scale, as published hybrids
+   indicate.
+4. Whole-system (wall-plug) energy metering to extend the GPU-board figures.
+5. Milestone: stream a real MoE checkpoint (Mixtral-class INT4) through this
+   pipeline end-to-end.
 
 **Rule going forward (CLAUDE.md §15): claim only what the artifact demonstrates.**
