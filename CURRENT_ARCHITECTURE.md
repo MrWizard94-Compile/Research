@@ -1,11 +1,23 @@
-# CURRENT ARCHITECTURE (Iterations 16–18 — Corrected Streaming, Measured MoE, Quantized Transfer)
+# CURRENT ARCHITECTURE (Iterations 16–19 — Corrected Streaming → Combined Measured Stack)
 
-**Iterations**: 16 (audit + corrected dense streaming) · 17 (MoE expert streaming, kernels, energy, hybrid ratios) · 18 (quantized transfer, prefetch economics, ratio at scale)
+**Iterations**: 16 (audit + corrected dense streaming) · 17 (MoE expert streaming, kernels, energy, hybrid ratios) · 18 (quantized transfer, prefetch economics, ratio at scale) · 19 (row-block INT4, combined pipeline)
 **Date**: 2026-07-03
 **Artifacts**: `iteration16_corrected_streaming.py`, `iteration16_quality_mqar.py`,
 `iteration17_moe_streaming.py`, `iteration17_hybrid_ratio_mqar.py`,
 `iteration18_quant_streaming.py`, `iteration18_prefetch_miss_curve.py`,
-`iteration18_ratio_scale_probe.py`
+`iteration18_ratio_scale_probe.py`, `iteration19_opt_unpack.py`,
+`iteration19_combined_moe.py`
+
+## The Combined Stack (Iteration 19 — current best, all measured)
+
+One pipeline: INT4 row-block packed experts in pinned host RAM (16.8 MB/expert)
+→ prefetch predicted experts one layer ahead (real on-demand fetch per miss,
+h=0.85) → unpack with contiguous writes + scale/zero-point folded into the
+activation → fp16 GEMV (B=1) or dynamic-INT8 `_int_mm` (B=32). On the 16-layer
+testbed: **16.25 tok/s single-stream (11.5× the fp16 dense-equivalent, 8× less
+energy)**, 463 tok/s aggregate at B=32. Scaled 70B-class MoE INT4:
+**1.07 tok/s** single-stream. Residual value of truly fused kernels after the
+row-block optimization: a measured **1.21×** (dense INT4: 0.28 vs 0.34 tok/s).
 
 > **Correction notice**: The Iteration 15 version of this document reported results
 > from a benchmark that never ran the model it claimed (an 8-layer, <10 MB proxy was

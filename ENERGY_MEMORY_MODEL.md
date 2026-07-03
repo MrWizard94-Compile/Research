@@ -1,7 +1,22 @@
-# ENERGY / MEMORY / PERFORMANCE MODEL (Iterations 16–18 — Corrected, Measured)
+# ENERGY / MEMORY / PERFORMANCE MODEL (Iterations 16–19 — Corrected, Measured)
 
-**Iterations**: 16 (dense streaming, corrected model) + 17 (MoE, kernels, energy) + 18 (quantized transfer, prefetch curve)
+**Iterations**: 16 (dense streaming, corrected model) + 17 (MoE, kernels, energy) + 18 (quantized transfer, prefetch curve) + 19 (optimized unpack, combined stack)
 **Date**: 2026-07-03
+
+## Iteration 19 Update — Optimized INT4 and the Combined Stack
+
+Row-block INT4 packing (contiguous unpack writes) + folding scale/zero-point
+into the activation (`y = (x·s)@Q − 8·(x·s).sum()`) cuts the unpack term ~2.5×:
+dense testbed 3.10 → **9.76 tok/s (3.15×)**; 70B dense INT4 in stock torch
+0.14 → **0.28 tok/s** vs the 0.34 fused bound (**residual fused-kernel value:
+1.21×, measured**).
+
+All levers combined (INT4 row-block experts + prefetch h=0.85 with real miss
+fetches + `_int_mm` INT8 batched compute), 16-layer MoE testbed:
+**16.25 tok/s** single-stream B=1 (**11.5×** the fp16 dense-equivalent, 3.3 vs
+26.9 J/token = **8× less energy**); **463 tok/s aggregate** at B=32. Scaled
+70B-class MoE INT4 at measured ms/GB: **1.07 tok/s** single-stream (dense
+attention floor of a real MoE transformer not modeled; stated).
 
 > **Correction notice**: The Iteration 15 version of this model divided PCIe
 > transfer time by prefetch depth (physically impossible on a shared link) and the

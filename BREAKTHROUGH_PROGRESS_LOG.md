@@ -6,6 +6,73 @@
 
 ---
 
+## Iteration 19 — Optimized INT4 Unpack + Combined Full-Stack Pipeline
+
+**Date**: 2026-07-03
+**Artifacts**: `iteration19_opt_unpack.py`, `iteration19_combined_moe.py`
+
+### 1. Row-block INT4 + dequant-math folding — most of the fused-kernel prize, in stock PyTorch
+
+Two zero-inference-cost changes attack iteration 18's dequant bottleneck:
+row-block nibble packing (offline repack → contiguous unpack writes instead of
+strided) and folding the per-row scale/zero-point into the activation
+(`y = (x·s) @ Q − 8·(x·s).sum()` replaces two full [n×n] fp16 passes with O(n)
+work). Measured on the 16-layer dense streaming testbed (B=1):
+
+| format | wall/token | compute | bound | tok/s |
+|---|---:|---:|---|---:|
+| fp16 | 322 ms | 26 ms | PCIe | 3.10 |
+| INT4 naive (iter. 18) | 206 ms | 200 ms | dequant | 4.87 |
+| **INT4 row-block** | **103 ms** | 97 ms | dequant (barely) | **9.76 (3.15× vs fp16)** |
+
+70B dense INT4 in stock torch rises from 0.14 → **0.28 tok/s**, against the
+0.34 fused-kernel bound: **the remaining value of truly fused kernels is now a
+measured 1.21×** (was 2.54×). WSL2 here has only a docker-desktop distro, so
+the Triton path stays future work — now with a much smaller prize attached.
+
+### 2. Combined full-stack pipeline — the levers compound
+
+INT4 row-block experts (16.8 MB vs 67.1 MB fp16) + expert prefetch with real
+on-demand miss fetches + `_int_mm` INT8 batched compute, all in one pipeline:
+
+| mode | wall/token | GB moved | tok/s | J/token |
+|---|---:|---:|---:|---:|
+| B=1, fp16 GEMV, h=1.00 | 60.8 ms | 0.537 | 16.46 | 2.9 |
+| **B=1, fp16 GEMV, h=0.85** | **61.5 ms** | 0.582 | **16.25** | **3.3** |
+| B=32, `_int_mm`, h=1.00 | 68.5 ms | 0.537 | 466.9 aggregate | 3.7 |
+| B=32, `_int_mm`, h=0.85 | 69.1 ms | 0.582 | 462.9 aggregate | 4.0 |
+
+- vs iteration-17 fp16 MoE oracle (5.69 tok/s): **2.86×**.
+- vs iteration-17 fp16 dense-equivalent (1.41 tok/s): **11.52×**, with energy
+  26.9 → 3.3 J/token (**8× less energy per token**, GPU board).
+- Realistic prefetch (h=0.85) costs ~1% in the combined stack — transfer is
+  small enough that misses hide almost entirely.
+- **70B-class MoE INT4, scaled from measured ms/GB: 1.07 tok/s single-stream**
+  (before a real MoE transformer's dense attention floor; stated).
+
+### Campaign scoreboard after 19 iterations (same machine, all measured)
+
+| configuration | tok/s (B=1) | J/token |
+|---|---:|---:|
+| fp16 dense-equivalent streaming (the honest starting point) | 1.41 | 26.9 |
+| + MoE top-2/8 (iter. 17) | 5.58 | 6.5 |
+| + INT4 row-block transfer + folded dequant (iter. 19) | 16.46 | 2.9 |
+| + realistic prefetch h=0.85 | 16.25 | 3.3 |
+| + `_int_mm` at B=32 | 462.9 aggregate | 4.0 |
+
+### Next steps (Iteration 20 candidates)
+
+1. Real-checkpoint milestone (Mixtral-class INT4 via this pipeline or
+   llama.cpp): unlocks real routing traces (true predictor hit rates), real
+   quality, and closes the "random weights" caveat on every number above.
+2. Triton fused dequant-GEMV under a real WSL2 dev distro — measured residual
+   prize: 1.21× on dense INT4.
+3. Wall-plug energy metering (hardware meter required).
+4. Dense attention floor modeling for MoE transformers (the one stated gap in
+   the 70B MoE numbers).
+
+---
+
 ## Iteration 18 — Quantized Transfer, Prefetch Economics, Ratio at Scale
 
 **Date**: 2026-07-03

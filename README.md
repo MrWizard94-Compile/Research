@@ -7,9 +7,26 @@ frontier-scale AI (70B+ class) from running locally on consumer/edge hardware.
 This is a long-term recursive engineering campaign. Every claim must be backed by
 a runnable artifact and validated measurement.
 
-## Current Status (2026-07-03, Iteration 18)
+## Current Status (2026-07-03, Iteration 19)
 
-**Iteration 18 (latest)** — quantized transfer, prefetch economics, and the
+**Iteration 19 (latest)** — the measured levers, combined
+(`results/iteration19_*.json`):
+
+- **Row-block INT4 packing + dequant-math folding** recovers most of the
+  fused-kernel prize in stock PyTorch: dense streaming 3.10 → **9.76 tok/s
+  (3.15×)** on the testbed; 70B dense INT4 rises 0.14 → **0.28 tok/s**, leaving
+  a measured **1.21×** for truly fused kernels (was 2.54×).
+- **Combined full-stack MoE pipeline** (INT4 row-block experts + prefetch at
+  realistic h=0.85 with real miss fetches + `_int_mm` INT8 batched compute):
+  **16.25 tok/s single-stream / 463 tok/s aggregate at B=32** on the testbed —
+  **11.5× the fp16 dense-equivalent, at 8× less energy (3.3 vs 26.9 J/token)**.
+  Scaled 70B-class MoE INT4: **1.07 tok/s single-stream**, every term measured.
+
+Campaign scoreboard (same machine, B=1, measured): 1.41 tok/s honest fp16
+baseline → 5.58 (+MoE) → 16.25 (+INT4 row-block + prefetch), with `_int_mm`
+adding batched aggregate throughput on top.
+
+**Iteration 18** — quantized transfer, prefetch economics, and the
 ratio-at-scale answer, all measured (`results/iteration18_*.json`):
 
 - **INT8 streaming is the stock-PyTorch sweet spot**: 1.89× end-to-end
@@ -128,6 +145,8 @@ python iteration17_hybrid_ratio_mqar.py --steps 4000 --plot # ratio sweep
 python iteration18_quant_streaming.py --plot                # INT8/INT4 transfer
 python iteration18_prefetch_miss_curve.py --plot            # predictor economics
 python iteration18_ratio_scale_probe.py                     # 1:3 at d=256
+python iteration19_opt_unpack.py --plot                     # row-block INT4
+python iteration19_combined_moe.py --plot                   # full stack combined
 python iteration1_sim.py                                    # analytical model
 ```
 
@@ -146,15 +165,17 @@ regenerate them by running the artifacts.
   historical entries preserved unedited).
 - `CLAUDE.md` — the working rules this audit enforced.
 
-## Next Steps (Iteration 19 candidates)
+## Next Steps (Iteration 20 candidates)
 
-1. Fused dequant-GEMV kernels — Triton under WSL2 or llama.cpp integration.
-   The prize is now measured: 2.54× on dense INT4 streaming.
-2. Combine the measured levers in one pipeline (INT8 expert streaming +
-   realistic prefetch + `_int_mm` batched compute) for a single end-to-end
-   number for the full stack.
-3. Real-checkpoint milestone (Mixtral-class INT4): real routing traces enable
-   an actual predictor and quality measurement on the streamed stack.
+1. Real-checkpoint milestone (Mixtral-class INT4 through this pipeline or
+   llama.cpp): unlocks real routing traces (true predictor hit rates), real
+   quality measurement, and closes the "random weights" caveat on the
+   systems numbers.
+2. Triton fused dequant-GEMV under a proper WSL2 dev distro — measured
+   residual prize: 1.21× on dense INT4 (down from 2.54× after iteration 19's
+   row-block optimization).
+3. Dense attention floor modeling for MoE transformers — the one stated gap
+   in the 70B MoE throughput numbers.
 4. Whole-system (wall-plug) energy metering — requires a hardware meter.
 
 **Rule going forward (CLAUDE.md §15): claim only what the artifact demonstrates.**

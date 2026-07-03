@@ -32,16 +32,18 @@ resident.
 | case | tok/s | basis |
 |---|---:|---|
 | Baseline transformer, GPU-resident | does not fit | — |
-| Streamed dense 70B INT4, B=1, **fused kernels** | **0.34** (PCIe-bound: 35.3 GB ÷ 12.3 GB/s) | validated projection; fused dequant-GEMV required |
-| Streamed dense 70B INT4, B=1, stock-torch kernels | 0.14 (unpack-bound) | **measured** (iter. 18: fused kernels worth 2.54×) |
+| Streamed dense 70B INT4, fused kernels | 0.34 (PCIe bound) | validated projection |
+| Streamed dense 70B INT4, stock torch naive | 0.14 (unpack-bound) | measured (iter. 18) |
+| Streamed dense 70B INT4, **stock torch row-block** | **0.28** | **measured** (iter. 19; residual fused-kernel value 1.21×) |
 | + 13% VRAM residency | 0.40 | validated projection |
-| **MoE top-2/8 expert streaming, B=1** | **1.37** (oracle; −4–11% at real predictor hit rates) | **measured lever** (iter. 17–18: 4.00× fewer bytes; miss-penalty curve within 1% of analytic) |
-| Batch/speculative B=8–32, INT8 `_int_mm` compute | approaching weight-read bound | measured kernel: 62.2 vs 3.7 Gweights/s fp16 (16.4×) |
-| Batch/speculative B=32 | 5.3–11.0 aggregate | projection, measured kernel rates |
+| **70B-class MoE INT4, combined stack, h=0.85** | **1.07** | **measured ms/GB, scaled** (iter. 19; attention floor not modeled) |
+| Batched decode, `_int_mm` INT8 | 62.2 vs 3.7 Gweights/s fp16 (16.4×) | measured kernel |
 
-Iteration 18 measured testbed uplift from quantized transfer (16 L, B=1):
-fp16 3.15 → **INT8 5.96 tok/s (1.89×, PCIe-bound)**; INT4-packed 4.86 (1.54×,
-dequant-bound in stock torch — the quantified case for fused kernels).
+Measured testbed progression (16 layers, B=1, same machine):
+fp16 dense-equivalent 1.41 tok/s / 26.9 J → +MoE 5.58 / 6.5 → **+INT4 row-block
++ prefetch h=0.85: 16.25 tok/s / 3.3 J (11.5× faster, 8× less energy)**;
+B=32 `_int_mm`: 463 tok/s aggregate. Dense path: fp16 3.10 → INT8 5.96 →
+INT4 row-block 9.76 tok/s.
 
 Measured anchors: 16 × 0.242 GB layers → 3.15 tok/s; 48 × 0.242 GB → 1.06 tok/s;
 overlap efficiency 93–98%; projection error vs. measurement 0–6%. MoE testbed
