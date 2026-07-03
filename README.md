@@ -7,9 +7,27 @@ frontier-scale AI (70B+ class) from running locally on consumer/edge hardware.
 This is a long-term recursive engineering campaign. Every claim must be backed by
 a runnable artifact and validated measurement.
 
-## Current Status (2026-07-02, Iteration 17)
+## Current Status (2026-07-03, Iteration 18)
 
-**Iteration 17 (latest)** executed the four next steps from Iteration 16, all
+**Iteration 18 (latest)** — quantized transfer, prefetch economics, and the
+ratio-at-scale answer, all measured (`results/iteration18_*.json`):
+
+- **INT8 streaming is the stock-PyTorch sweet spot**: 1.89× end-to-end
+  (3.15 → 5.96 tok/s on the 16-layer testbed), still PCIe-bound. INT4-packed
+  transfer is dequant-bound in stock torch (unpack 4.8 GB/s), putting dense 70B
+  at 0.14 tok/s — **fused dequant-GEMV kernels are worth a measured 2.54×**,
+  and `torch._int_mm` (INT8 DP4A) restores 16.4× of the batched-decode gap.
+  The throughput model gains a third term: `max(transfer, dequant + gemm)`.
+- **Prefetch economics measured**: tok/s vs expert-predictor hit rate matches
+  `oracle + misses × 5.5 ms` within 1%; published 80–90% predictors cost only
+  4–11% vs perfect prefetch. Predictor quality is not the bottleneck — bytes are.
+- **Ratio at scale**: doubling width and budget does not rescue the 1:3 hybrid —
+  it stays indistinguishable from pure SSM (control at same width). The measured
+  hybrid frontier on this testbed remains **1:1 = transformer recall at half KV**;
+  sparser ratios' production-scale success is an open question here, recorded
+  with evidence, neither contradicted nor confirmed.
+
+**Iteration 17** executed the four next steps from Iteration 16, all
 measured on the target machine (GTX 1660 Ti 6 GB + 51.4 GB host):
 
 - **MoE expert streaming measured end-to-end** (`iteration17_moe_streaming.py`):
@@ -107,6 +125,9 @@ python iteration16_corrected_streaming.py --stress --plot   # 48 x 0.242 GB
 python iteration16_quality_mqar.py --steps 4000 --plot
 python iteration17_moe_streaming.py --plot                  # MoE lever, measured
 python iteration17_hybrid_ratio_mqar.py --steps 4000 --plot # ratio sweep
+python iteration18_quant_streaming.py --plot                # INT8/INT4 transfer
+python iteration18_prefetch_miss_curve.py --plot            # predictor economics
+python iteration18_ratio_scale_probe.py                     # 1:3 at d=256
 python iteration1_sim.py                                    # analytical model
 ```
 
@@ -125,18 +146,15 @@ regenerate them by running the artifacts.
   historical entries preserved unedited).
 - `CLAUDE.md` — the working rules this audit enforced.
 
-## Next Steps (Iteration 18 candidates)
+## Next Steps (Iteration 19 candidates)
 
-1. Custom INT4/fused decode kernels (WSL2 Triton or llama.cpp integration) to
-   close the measured 26× batched-GEMM gap and make B=8–32 streaming
-   weight-read-bound.
-2. Expert-prefetch predictor to close the measured JIT→oracle routing gap;
-   evaluate hit rate against recorded routing traces.
-3. Scale the hybrid-ratio question (wider d_model, more heads/steps) to test
-   whether sparse ratios (1:3+) recover recall with scale, as published hybrids
-   indicate.
-4. Whole-system (wall-plug) energy metering to extend the GPU-board figures.
-5. Milestone: stream a real MoE checkpoint (Mixtral-class INT4) through this
-   pipeline end-to-end.
+1. Fused dequant-GEMV kernels — Triton under WSL2 or llama.cpp integration.
+   The prize is now measured: 2.54× on dense INT4 streaming.
+2. Combine the measured levers in one pipeline (INT8 expert streaming +
+   realistic prefetch + `_int_mm` batched compute) for a single end-to-end
+   number for the full stack.
+3. Real-checkpoint milestone (Mixtral-class INT4): real routing traces enable
+   an actual predictor and quality measurement on the streamed stack.
+4. Whole-system (wall-plug) energy metering — requires a hardware meter.
 
 **Rule going forward (CLAUDE.md §15): claim only what the artifact demonstrates.**

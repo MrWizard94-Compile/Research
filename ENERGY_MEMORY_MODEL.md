@@ -1,7 +1,7 @@
-# ENERGY / MEMORY / PERFORMANCE MODEL (Iterations 16–17 — Corrected, Measured)
+# ENERGY / MEMORY / PERFORMANCE MODEL (Iterations 16–18 — Corrected, Measured)
 
-**Iterations**: 16 (dense streaming, corrected model) + 17 (MoE, kernels, energy)
-**Date**: 2026-07-02
+**Iterations**: 16 (dense streaming, corrected model) + 17 (MoE, kernels, energy) + 18 (quantized transfer, prefetch curve)
+**Date**: 2026-07-03
 
 > **Correction notice**: The Iteration 15 version of this model divided PCIe
 > transfer time by prefetch depth (physically impossible on a shared link) and the
@@ -87,6 +87,57 @@ above and is PCIe-bound at ~0.34 tok/s dense (B=1).
 - 70B-class MoE anchor: 35.3 GB × 25% active = 8.8 GB/token → **1.37 tok/s**
   single-stream at measured PCIe (vs. 0.34 dense), before the dense
   attention-weight floor of a real MoE transformer.
+
+## Quantized-Transfer Extension (Iteration 18 — the dequant term the projections were missing)
+
+Every 70B projection assumes INT4-packed bytes move over PCIe. Iteration 18
+measures what turning packed bytes into computable weights costs in stock
+PyTorch (`iteration18_quant_streaming.py`, 16 L × 0.242 GB-fp16 testbed, B=1,
+dequant into preallocated buffers, overlapped pipeline):
+
+| transfer format | GB/token | transfer ms | dequant+GEMV ms | bound | tok/s | J/token |
+|---|---:|---:|---:|---|---:|---:|
+| fp16 | 3.88 | 316 | 26 | PCIe | 3.15 | 11.6 |
+| INT8 → GPU dequant | 1.94 | 160 | 132 | PCIe (barely) | **5.96 (1.89×)** | 9.0 |
+| INT4-packed → GPU unpack | 0.97 | 80 | 200 | **dequant** | 4.86 (1.54×) | 11.8 |
+
+The corrected throughput model gains a third term:
+
+```
+per_layer = max(transfer_ms, dequant_ms + gemm_ms)
+```
+
+**Measured consequence for dense 70B INT4 with stock-torch kernels**: the unpack
+bound (35.3 GB ÷ 4.8 GB/s packed) is 7.3 s/token = **0.14 tok/s**, worse than
+the 0.35 tok/s transfer bound. Fused dequant-GEMV kernels (llama.cpp-class,
+which read packed weights inside the GEMM) are therefore worth a **measured
+2.54×** on this machine — the "custom kernels needed" claim is now a number.
+INT8 is the stock-torch sweet spot: dequant (via tensor `copy_` dtype cast +
+`mul_`) nearly keeps pace with PCIe, delivering 1.89× end-to-end.
+
+Batched decode (iteration 16's other kernel gap) also has a stock-torch fix
+measured this iteration: `torch._int_mm` (INT8 DP4A) consumes **62.2 Gweights/s
+at B=8–32 vs 3.7–3.8 Gweights/s** for the fp16 GEMM path — 16.4× — with the
+constraint M > 16 (B ≤ 16 requires padding; measured with M=17).
+
+## Expert-Prefetch Miss-Penalty Curve (Iteration 18)
+
+Routing for layer *i+1* depends on layer *i*'s output; predictors bridge the
+gap. Measured cost of predictor accuracy on the iteration 17 MoE testbed
+(real on-demand fetch per miss; `iteration18_prefetch_miss_curve.py`):
+
+| hit rate | ms/token | misses/token | tok/s |
+|---:|---:|---:|---:|
+| 1.00 (oracle) | 176 | 0 | 5.69 |
+| 0.90 | 183 | 1.3 | 5.46 |
+| 0.80 | 197 | 3.7 | 5.08 |
+| 0.50 | 255 | 14.3 | 3.92 |
+| 0.25 (chance) | 298 | 22.0 | 3.35 |
+
+Analytic model `wall ≈ oracle + misses × 5.5 ms` matches within 1%. Published
+predictor hit rates (~80–90%: Pre-gated MoE, Fiddler, MoE-Infinity) cost only
+**4–11% vs. perfect prefetch** — prediction quality is not the bottleneck on
+this pipeline; bytes are.
 
 ## Kernel-Path Sweep (Iteration 17 — the B>1 gap is real in stock PyTorch)
 

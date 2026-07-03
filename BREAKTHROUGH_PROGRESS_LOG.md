@@ -6,6 +6,95 @@
 
 ---
 
+## Iteration 18 — Quantized Transfer, Prefetch Economics, Ratio at Scale
+
+**Date**: 2026-07-03
+**Artifacts**: `iteration18_quant_streaming.py`, `iteration18_prefetch_miss_curve.py`,
+`iteration18_ratio_scale_probe.py`
+
+### 1. Quantized transfer streaming — the dequant term, measured
+
+Every prior 70B projection assumed INT4-packed bytes over PCIe with free
+dequantization. Measured on the 16-layer testbed (B=1, overlapped pipeline,
+preallocated dequant buffers):
+
+| format | GB/token | transfer | dequant+GEMV | bound | tok/s | J/token |
+|---|---:|---:|---:|---|---:|---:|
+| fp16 | 3.88 | 316 ms | 26 ms | PCIe | 3.15 | 11.6 |
+| INT8 → dequant | 1.94 | 160 ms | 132 ms | PCIe | **5.96 (1.89×)** | 9.0 |
+| INT4 → unpack | 0.97 | 80 ms | 200 ms | **dequant** | 4.86 (1.54×) | 11.8 |
+
+- **INT8 is the stock-PyTorch sweet spot**: dequant (dtype-cast `copy_` +
+  `mul_`) nearly keeps pace with PCIe → 1.89× end-to-end.
+- **INT4's 4× byte win is eaten by the stock unpack kernel** (4.8 GB/s packed):
+  dense 70B INT4 on stock torch is **0.14 tok/s** (unpack-bound), not the 0.35
+  transfer bound. **Fused dequant-GEMV kernels are worth a measured 2.54×** —
+  the kernel workstream now has a precise value.
+- Batched decode fix found in stock torch: `torch._int_mm` (INT8 DP4A) consumes
+  **62.2 Gweights/s at B=8–32 vs 3.7–3.8 fp16** (16.4×; constraint M>16,
+  B≤16 needs padding). The throughput model gains a third term:
+  `per_layer = max(transfer, dequant + gemm)`.
+
+### 2. Expert-prefetch miss-penalty curve — predictor accuracy priced
+
+Real on-demand fetch per miss on the iteration 17 MoE testbed; hit rate
+imposed (predictor design needs a real checkpoint — random weights have no
+learnable routing structure, and pretending otherwise would measure nothing):
+
+| hit rate | ms/token | misses | tok/s |
+|---:|---:|---:|---:|
+| 1.00 | 176 | 0 | 5.69 |
+| 0.90 | 183 | 1.3 | 5.46 |
+| 0.80 | 197 | 3.7 | 5.08 |
+| 0.50 | 255 | 14.3 | 3.92 |
+| 0.25 (chance) | 298 | 22.0 | 3.35 |
+
+Analytic model `oracle + misses × 5.5 ms` matches within 1%. At published
+80–90% hit rates (Pre-gated MoE, Fiddler, MoE-Infinity) the cost vs perfect
+prefetch is **4–11%: predictor quality is not the bottleneck; bytes are.**
+
+### 3. Ratio at scale — 1:3 is not rescued by width or budget
+
+Doubled width (d=256, ~3.5M params) and budget (8000 steps), pure-SSM control
+at the same width (`results/iteration18_ratio_scale.json`):
+
+| arm | N=4 | N=64 | N=128 |
+|---|---:|---:|---:|
+| ratio 1:3 (SSAS, d=256) | 0.270 | 0.061 | 0.034 |
+| ssm4 (SSSS, d=256) | 0.273 | 0.061 | 0.043 |
+
+The 1:3 hybrid remains **indistinguishable from pure SSM** — its attention
+layer contributes nothing measurable. Both arms also reproduce the late-
+training destabilization (loss 2.02 → 3.17 after step ~5k) seen at d=128, so
+it is a consistent optimization pathology of SSM-heavy stacks under this
+protocol, not noise. Bounded conclusion across iterations 16–18: on this
+testbed (d ≤ 256, ≤ 8000 steps, both placements), **the measured hybrid
+frontier is 1:1 — transformer recall at half KV**; sparser ratios' published
+success at production scale remains outside this testbed's envelope and is
+recorded as an open question, not contradicted and not confirmed.
+
+### Updated 70B-class picture on this machine (all measured or validated)
+
+- Dense INT4, stock-torch kernels: 0.14 tok/s (unpack-bound — measured).
+- Dense INT4, fused kernels: 0.35 tok/s (transfer bound — the kernel prize).
+- MoE top-2/8 + 80–90% prefetch: ~1.2–1.3 tok/s.
+- MoE + INT8 transfer for experts (fits: 2× bytes of INT4 but only active
+  experts move): combinable with the above; INT8 measured 1.89× on dense.
+- Batched decode: `_int_mm` restores 16.4× of the batched kernel gap.
+
+### Next steps (Iteration 19 candidates)
+
+1. Fused dequant-GEMV via Triton under WSL2 (measured prize: 2.54×) or
+   llama.cpp kernel integration.
+2. Combine levers in one pipeline: INT8 expert streaming + prefetch at
+   realistic hit rates + `_int_mm` batched compute — one measured end-to-end
+   number for the full stack.
+3. Real-checkpoint milestone (Mixtral-class INT4): real routing traces enable
+   an actual predictor and quality measurement on the streamed stack.
+4. Wall-plug energy metering (needs hardware meter).
+
+---
+
 ## Iteration 17 — MoE Streaming Measured, Kernel Paths, Energy, Hybrid Ratios
 
 **Date**: 2026-07-02

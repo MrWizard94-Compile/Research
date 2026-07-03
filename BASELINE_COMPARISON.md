@@ -32,11 +32,16 @@ resident.
 | case | tok/s | basis |
 |---|---:|---|
 | Baseline transformer, GPU-resident | does not fit | — |
-| Streamed dense 70B INT4, B=1 | **0.34** (PCIe-bound: 35.3 GB/token ÷ 12.3 GB/s) | validated projection |
+| Streamed dense 70B INT4, B=1, **fused kernels** | **0.34** (PCIe-bound: 35.3 GB ÷ 12.3 GB/s) | validated projection; fused dequant-GEMV required |
+| Streamed dense 70B INT4, B=1, stock-torch kernels | 0.14 (unpack-bound) | **measured** (iter. 18: fused kernels worth 2.54×) |
 | + 13% VRAM residency | 0.40 | validated projection |
-| **MoE top-2/8 expert streaming, B=1** | **1.37** (oracle prefetch; JIT −11%) | **measured lever** (iter. 17: 4.00× fewer bytes → 3.97× speedup on the 8.6 GB testbed) |
-| Batch/speculative B=8 | 1.6 aggregate (2.8 if weight-read-bound kernels) | projection, measured kernel rates |
-| Batch/speculative B=32 | 5.3 aggregate (11.0 if weight-read-bound kernels) | projection, measured kernel rates |
+| **MoE top-2/8 expert streaming, B=1** | **1.37** (oracle; −4–11% at real predictor hit rates) | **measured lever** (iter. 17–18: 4.00× fewer bytes; miss-penalty curve within 1% of analytic) |
+| Batch/speculative B=8–32, INT8 `_int_mm` compute | approaching weight-read bound | measured kernel: 62.2 vs 3.7 Gweights/s fp16 (16.4×) |
+| Batch/speculative B=32 | 5.3–11.0 aggregate | projection, measured kernel rates |
+
+Iteration 18 measured testbed uplift from quantized transfer (16 L, B=1):
+fp16 3.15 → **INT8 5.96 tok/s (1.89×, PCIe-bound)**; INT4-packed 4.86 (1.54×,
+dequant-bound in stock torch — the quantified case for fused kernels).
 
 Measured anchors: 16 × 0.242 GB layers → 3.15 tok/s; 48 × 0.242 GB → 1.06 tok/s;
 overlap efficiency 93–98%; projection error vs. measurement 0–6%. MoE testbed
@@ -70,10 +75,12 @@ sweep (chance = 1.6%; N = pairs stored in context; N=128 is length extrapolation
 | ssm4 | SSSS | 5.5% | 3.7% | ~0 MB |
 
 † Did not converge; investigated — attention-last placement and a 2× training
-budget both fail the same way (`results/iter17_ssas_diagnostic.txt`). At this
-scale one attention layer forms the recall circuit behind one SSM block
-(iteration 16) but not behind three. Production hybrids run sparser ratios at
-far larger scale; **at this scale, 1:1 is the measured frontier:
+budget both fail the same way (`results/iter17_ssas_diagnostic.txt`), and the
+iteration 18 scale probe (d=256, 8000 steps, pure-SSM control) shows the 1:3
+hybrid remains **indistinguishable from pure SSM** even at doubled width. At
+this testbed's scale one attention layer forms the recall circuit behind one
+SSM block (iteration 16) but not behind three. Production hybrids run sparser
+ratios at far larger scale; **on this testbed, 1:1 is the measured frontier:
 transformer-level recall at half the KV.** The retracted "constant state with
 perfect quality" claim stays replaced by this measured trade-off.
 

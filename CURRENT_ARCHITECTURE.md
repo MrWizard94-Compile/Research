@@ -1,9 +1,11 @@
-# CURRENT ARCHITECTURE (Iterations 16–17 — Corrected Streaming + Measured MoE)
+# CURRENT ARCHITECTURE (Iterations 16–18 — Corrected Streaming, Measured MoE, Quantized Transfer)
 
-**Iterations**: 16 (audit + corrected dense streaming) · 17 (MoE expert streaming, kernels, energy, hybrid ratios)
-**Date**: 2026-07-02
+**Iterations**: 16 (audit + corrected dense streaming) · 17 (MoE expert streaming, kernels, energy, hybrid ratios) · 18 (quantized transfer, prefetch economics, ratio at scale)
+**Date**: 2026-07-03
 **Artifacts**: `iteration16_corrected_streaming.py`, `iteration16_quality_mqar.py`,
-`iteration17_moe_streaming.py`, `iteration17_hybrid_ratio_mqar.py`
+`iteration17_moe_streaming.py`, `iteration17_hybrid_ratio_mqar.py`,
+`iteration18_quant_streaming.py`, `iteration18_prefetch_miss_curve.py`,
+`iteration18_ratio_scale_probe.py`
 
 > **Correction notice**: The Iteration 15 version of this document reported results
 > from a benchmark that never ran the model it claimed (an 8-layer, <10 MB proxy was
@@ -95,6 +97,25 @@ The kernel-path sweep in the same artifact confirms the batched fp16 GEMM gap on
 this GPU is real across stock formulations (204 GB/s at B=1 vs ~7.5 GB/s at
 B=8/32) — custom INT4/fused kernels are the identified path back to the
 weight-read bound for batched decode.
+
+## Quantized Transfer + Prefetch Economics (Iteration 18)
+
+Two measured refinements close the remaining assumption gaps:
+
+**Quantized transfer** (`iteration18_quant_streaming.py`): streaming INT8 bytes
+and dequantizing on-GPU is the stock-PyTorch sweet spot — **1.89× end-to-end
+(3.15 → 5.96 tok/s on the 16-layer testbed)**, still PCIe-bound. INT4-packed
+transfer moves 4× fewer bytes but the stock unpack kernel (4.8 GB/s packed)
+makes the pipeline dequant-bound: 1.54× only, and dense 70B INT4 lands at
+0.14 tok/s instead of the 0.35 transfer bound. **Fused dequant-GEMV kernels are
+worth a measured 2.54×** — that, plus `torch._int_mm` for batched decode
+(62.2 vs 3.7 Gweights/s, 16.4×), defines the kernel workstream precisely.
+
+**Prefetch economics** (`iteration18_prefetch_miss_curve.py`): tok/s vs expert-
+predictor hit rate, with real on-demand fetches per miss, matches
+`oracle + misses × 5.5 ms` within 1%. At published ~80–90% hit rates the cost
+vs perfect prefetch is only 4–11%: **predictor quality is not the bottleneck on
+this pipeline; bytes are.**
 
 ## Memory Model @ 128k Context (the part of the original thesis that survives)
 
