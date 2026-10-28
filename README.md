@@ -1,5 +1,10 @@
 # RECURSIVE — Von Neumann Bypass for Practical Local Frontier AI
 
+Agent onboarding: read [AGENTS.md](AGENTS.md) and use the verified canonical
+WPAI Constitution skill. This is a dated campaign record, not a new benchmark
+or acceptance claim made by the governance adoption. Existing retractions,
+research measurements and unpublished work remain unchanged.
+
 **Mission**: Deliver real, measurable, reproducible progress toward eliminating the
 von Neumann data-movement energy tax and VRAM scaling walls that prevent
 frontier-scale AI (70B+ class) from running locally on consumer/edge hardware.
@@ -133,7 +138,17 @@ the trade-off is now measured instead of asserted.
 4. Honest assumptions, limitations, maturity — **restored by this iteration**.
 5. Extensible, clean code — **met** for iteration 16 artifacts.
 
-## Reproduce
+## Governance-only verification
+
+```powershell
+python -B -X utf8 -W error -m unittest discover -s governance_tests -v
+```
+
+This stdlib-only check parses source without importing or executing benchmarks.
+It does not regenerate results, download models, exercise Torch/CUDA or prove
+the research claims below. See AGENTS for data/resource and approval boundaries.
+
+## Reproduce (benchmarks; separate intentional run)
 
 ```powershell
 # System Python 3.10 with torch 2.12.1+cu126 (see requirements.txt notes)
@@ -163,7 +178,7 @@ regenerate them by running the artifacts.
 - `BASELINE_COMPARISON.md` — honest head-to-head vs. the von Neumann baseline.
 - `RECURSIVE_STATE.md` — full campaign history (correction notice at top;
   historical entries preserved unedited).
-- `CLAUDE.md` — the working rules this audit enforced.
+- [AGENTS.md](AGENTS.md) — current source-linked project entry and measurement boundaries.
 
 ## Next Steps (Iteration 20 candidates)
 
@@ -178,4 +193,4 @@ regenerate them by running the artifacts.
    in the 70B MoE throughput numbers.
 4. Whole-system (wall-plug) energy metering — requires a hardware meter.
 
-**Rule going forward (CLAUDE.md §15): claim only what the artifact demonstrates.**
+**For current research scope and measurement boundaries, read [AGENTS.md](AGENTS.md).**

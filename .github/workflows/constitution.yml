@@ -1,0 +1,55 @@
+name: Validate Recurrsive governance without benchmark execution
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  project:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+        python: ['3.10', '3.12']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Check entries, research boundaries and nonexecuting source parser
+        run: python -B -X utf8 -W error -m unittest discover -s governance_tests -v
+
+  canonical:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Set the initial branch for disposable checkout repositories
+        run: git config --global init.defaultBranch main
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: project
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: MrWizard94-Compile/Agents-Constitution
+          ref: 0010a8353b00754fad31a30ed24327d3b6d05425
+          path: constitution
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Validate accepted canonical source
+        working-directory: constitution
+        run: python tools/validate-source.py
+      - name: Test accepted canonical tools
+        working-directory: constitution
+        run: python -X utf8 -W error -m unittest discover -s tests -v
+      - name: Audit actual project root
+        working-directory: project
+        run: python ../constitution/tools/check-adoption.py .

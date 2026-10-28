@@ -15,3 +15,8 @@ plots/
 # Bulk archives / imported external projects
 *.zip
 extracted_grok_project/
+
+# Iteration 20: external inference stack + model checkpoints (multi-GB)
+tools/
+models/
+*.gguf
